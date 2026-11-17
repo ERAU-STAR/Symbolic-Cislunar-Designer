@@ -1,152 +1,116 @@
-# Cislunar Symbolic Designer (v0.3)
+# Symbolic Cislunar Designer
 
-Interactive symbolic trajectory design for the Earth-Moon system, built on
+Interactive symbolic trajectory design for the Earth–Moon system. Based on
 Jo, Sahin & Canales, "Symbolic Dynamics of Cislunar Transport" (AAS 27-530).
-Everything runs on the device (browser Web Workers); nothing is sent to a server.
 
-## Run
+**Run it online:** https://erau-star.github.io/Symbolic-Cislunar-Designer/
+
+The Earth–Moon space is split into 14 regions (symbols). A trajectory is then described by the sequence of
+regions it visits, which is its *word*. The app lets you do the design in that order:
+
+1. pick a word;
+2. map which initial conditions on a section realise it;
+3. open and fine-tune the trajectory;
+4. change it with impulsive maneuvers.
+
+Six dynamical models are available, from the CR3BP to a full ephemeris model. Real missions (OEM / Horizons
+files) can be loaded and used as starting points.
+
+All computation runs in the browser, using Web Workers for the maps. Nothing is sent to a server.
+
+Developed by Seur Gi Jo · STAR Group, Embry-Riddle Aeronautical University.
+This work is supported by the National Science Foundation under ERI Award CMMI-2501408 (PI: Dr. David Canales).
+
+---
+
+## Contents
+- [Quick start](#quick-start)
+- [Using the app](#using-the-app)
+- [Notation](#notation)
+- [Dynamical models](#dynamical-models)
+- [Real missions](#real-missions)
+- [How it works](#how-it-works)
+- [Code map](#code-map)
+- [Validation and tests](#validation-and-tests)
+- [Deployment](#deployment)
+
+## Quick start
+You need Node.js 18 or later (22 recommended).
 ```
 npm install
-npm run dev        # http://localhost:5173
-npm run build      # static site in dist/ (GitHub Pages ready, base './')
+npm run dev        # development server, http://localhost:5173
+npm run build      # type check + static site in dist/
+npm run preview    # serve the built site, http://localhost:4173
 ```
+The build uses `base: './'`, so `dist/` works from any sub-path, such as GitHub Pages or a folder on a web
+server.
 
-## Screens
-1. **Word**: Earth-Moon partition (graph_region_v7 rules) or the symbolic graph
-   G(1)..G(9) (Table 1). C slider with the regime thresholds, live ZVC, perturbation
-   switches (only CR3BP runs in v0.1), tap regions/nodes to build a word.
-2. **Symbolic map**: lunar-ellipse section for the word's first (entry) transition.
-   psi1/psi2 window (numbers, zoom box, accessible boundary pieces), horizon slider,
-   "Your word" (prefix match) / "All classes" (paper class words), fine/coarse alphabet.
-   Coarse grid first, then only blocks whose corners differ are refined; every level is
-   checkpointed in IndexedDB.
-3. **Trajectory**: rotating/inertial views, time scrubber, word timeline, IC export.
+## Using the app
+A start screen comes first; click the logo or **Start** to begin. The header logo takes you back to it. The
+header also holds the four screens and the **Missions** panel.
 
-## Code map
-- `src/core/constants.ts`  CR3BP constants, libration points, partition geometry, Table 1 regimes
-- `src/core/symbols.ts`    alphabet, colours, graph layout and edge family
-- `src/core/partition.ts`  point classifier (= classify_region) and display raster (v7 rules)
-- `src/core/cr3bp.ts`      DOP853 propagation with on-line region tracking
-- `src/core/section.ts`    ellipse section states, entry arcs, default window
-- `src/core/words.ts`      class words, prefix match, coarse alphabet
-- `src/core/mapEngine.ts`  adaptive dyadic refinement, worker pool, cache
-- `src/ui/*`               React screens
+### 1 · Word
+- Shows the Earth–Moon partition (the regions E, M, X with their sub-regions) or the symbolic graph G(1)…G(9).
+- The **Jacobi constant C** slider runs from 3.25 down to 0. The regime thresholds and the zero-velocity curve
+  update live, and the accessible graph changes with the regime.
+- Tap regions or graph nodes to build a word. Only allowed transitions can be chosen.
 
-## Validation
-`validation/fig12*.{npz,json}` hold the class map extracted from the paper's Fig. 12
-(FTLE_symbolicmap.fig: C = 3.1666, psi1 181-204 deg, psi2 17-52 deg, 0.2 deg).
-`tests/fig12.ts` reproduces it: 98.7 % of 864 sampled cells give the same class
-(the rest are isolated boundary cells).
-```
-node_modules/.bin/esbuild tests/fig12.ts --bundle --platform=node --format=esm --outfile=/tmp/fig12.mjs && node /tmp/fig12.mjs 15 5
-```
+### 2 · Symbolic map
+- The section is the transition into the selected symbol of the word. Any non-impact edge can be the section:
+  - the lunar ellipse;
+  - the L3–L4–L5 circle;
+  - the lines x = x_L1, x_Moon, x_L2 and 0;
+  - the line y = 0;
+  - the Earth–L4/L5 rays.
+- The map is drawn over (ψ₁ or s, ψ₂). It can also be drawn as a slice at fixed z and ψ₃, or over (z, ψ₃) at
+  a fixed section point.
+- Each point is coloured by:
+  - **Your word**: how many symbols of your word the trajectory realises; or
+  - **All classes**: the word class it falls into, with the colour schemes *Distinct* and *By ending*, and
+    optional class-boundary lines.
+- Maps are adaptive: a coarse grid first, then only the blocks whose corners differ are refined. Every level is
+  cached in the browser (IndexedDB), so revisiting a map is instant.
+- Zoom box, zoom out, and back to the previous view. The map keeps its place when you switch modes.
+- **3D volume**: a stack of maps, one layer per ψ₃ (or z), shown as voxels. Click a voxel to open its
+  trajectory.
+- Words before the section are found by backward propagation, so the section can sit anywhere in the word.
+- When a mission is loaded, its crossings of the current section edge are drawn as purple diamonds.
 
-## Models (v0.2)
-Perturbation switches pick the model: none = CR3BP, Moon eccentricity = ER3BP, Sun = HR4BP,
-Sun + eccentricity = QHR4BP (DataEcc), Sun + inclination = QHR4BP (DataInc), full ephemeris = HFEM
-(Earth, Moon, Sun point masses, JPL DE421). The epoch (2020-2035, TDB) sets f0, the LVO phase and the
-QPO angles (`public/data/phases.json`, same per-epoch fits as the Python/MATLAB pipeline) and the
-HFEM ephemeris (`public/data/ephem_YYYY.b64.txt`, hourly Float32). Section states use the
-"same position + instantaneous angular-rate" convention, so psi1, psi2 and C_ref are shared.
-`src/core/models.ts` holds the dynamics; `src/core/modelSetup.ts` builds them for an epoch;
-`tests/app_data_gen.py` regenerates the data files (needs the QHR4BP Python package).
-Cross-check against the Python engine (60 points, C = 3.1666, 2026-04-05): CR3BP 60/60,
-ER3BP 59/60, HR4BP 60/60, QHR4BP ecc 60/60, QHR4BP inc 60/60, HFEM 59/60.
+### 3 · Trajectory
+- Click a point on the map to open its trajectory.
+- Views: rotating, side (x–z), inertial, and a 3D viewer (three.js). The 3D viewer shows the trajectory coloured
+  by region, the zero-velocity surface, the section, and the Moon's path in the inertial frame. It has an
+  Earth–Moon view (default) and a Moon-centred view.
+- **Fine-tune**: a mini map around the point (drag on it), −/+ nudges with coarse/medium/fine steps, a step
+  slider, and typed values for ψ₁ / s, ψ₂, z, ψ₃.
+- A time slider and a word timeline. Initial conditions can be exported.
 
-## Sections and past/future words (v0.3)
-Any non-impact graph edge can be the section (`src/core/boundary.ts`): the lunar ellipse, the
-L3-L4-L5 circle, the lines x = x_L1, x_Moon, x_L2, 0, the line y = 0 and the Earth-L4/L5 rays.
-The boundary pieces that separate the two regions and are accessible at C are found by scanning
-each curve. Tap a symbol in the word bar to move "now": the section is the transition into that
-symbol; later symbols are matched forward, earlier ones by backward propagation over the same
-horizon (`propagate(..., { dir: -1 })`; model tables cover +-horizon, ephemeris files +-130 d).
-Checks: Fig. 12 through the general section 98.7 %; CR3BP backward run equals the mirrored forward
-run; backward QHR4BP/HFEM agree with the Python engine to ~1e-5 / 1e-8.
+### 4 · Maneuvers
+- Impulsive burns on the trajectory from screen 3, in any model.
+- A burn is set by |Δv| [m/s], the in-plane direction α and the out-of-plane angle β. It can be given in three
+  frames:
+  - VNB about the Moon;
+  - VNB about the Earth;
+  - the rotating frame.
+- Burn times run from −horizon to +horizon days around the section crossing, typed or set with a slider. Each
+  burn can be switched off.
+- Two ways a burn acts:
+  - **the side away from the section** (default): the state at the section is kept. Burns after it change the
+    future, and burns before it change the past.
+  - **only the past (keep the end)**: the trajectory after the last burn is kept, and each earlier state is
+    (state after − Δv) propagated backward.
+- **Δv map**: a symbolic map over (α, |Δv|) at fixed β, or (α, β) at fixed |Δv|, for the selected burn. It is
+  coloured by the word after the burn (or before it, read backward), or by how much of your word is realised.
+  - Clicking or dragging on the map sets the burn.
+  - The map can sit next to the trajectory and follow the time slider.
+- The trajectory without burns and the changed symbols are shown. The plan can be exported as JSON (burn times,
+  Δv in the chosen frame, rotating and inertial components, model states before and after each burn).
 
-## Screen 4: maneuvers (v0.9)
-`src/core/maneuver.ts`, `src/ui/ManeuverScreen.tsx`. Impulsive burns on the trajectory chosen on screen 3, in any
-model. A burn is an instantaneous inertial velocity change: the model state's velocity changes by A^-1 dv with
-A = dI/dx, the Jacobian of the model's inertial snapshot with respect to its position, so one code path serves
-every model. Components in VNB about the Moon, VNB about the Earth (V = velocity relative to that body, N = orbit
-normal, B = V x N) or the rotating x, y, z axes; values in m/s (typed, -/+ with a step of 10^-3 to 100 m/s).
-Burn times in days after the section crossing (typed or slider); any number of burns, each can be switched off.
-The plan is re-propagated on every change (CR3BP ~1-5 ms, HFEM ~10-25 ms). After a burn the word is classified with
-the new C (CR3BP: exact Jacobi; other models: the CR3BP-equivalent change of the pulsating speed). Shows the
-trajectory without burns, where the word changes, the total dv, and exports the plan as JSON (burn times, dv in
-the chosen frame, rotating and inertial, model states before and after each burn).
-Checks (`tests/maneuver.ts`): measured inertial dv equals the request to 1e-4 m/s in every model and frame;
-no-burn plan = plain propagation; CR3BP C after the burn = Jacobi of the new state; CR3BP rotating-x 10 m/s
-changes vx by exactly 0.01 / (LSTAR/TSTAR).
-Fix found on the way: the integrator could stall at the end of a segment when the remaining time fell below the
-rounding of t (HFEM uses seconds); the last step now lands exactly on the end time.
-
-## Δv as magnitude and direction; Δv symbolic map (v0.10)
-A burn is |Δv| [m/s], in-plane direction α and out-of-plane angle β [deg]. VNB frames: α from V towards B
-(0 = prograde, 90 = outward, 180 = retrograde), β towards N (orbit normal); rotating frame: α from +x towards +y,
-β towards +z (the same convention as ψ₂ / ψ₃). Components are shown for reference and exported.
-Δv map (screen 4 → "Δv map", `src/ui/DvMap.tsx`): adaptive map over (α, |Δv|) at fixed β or (α, β) at fixed |Δv|
-for the selected burn (earlier burns applied, later ones ignored), coloured by the word after the burn (first
-4–20 symbols) or by how much of your word the whole trajectory realises. Runs on the map engine through a
-`custom` map (model states at the burn time, each with its own C; `prepareDvMap` precomputes the Jacobian so a
-grid point costs one linear update). Clicking or dragging on the map sets the burn and the trajectory updates.
-Check: the map's state for a grid point equals the full plan's post-burn state (relative difference < 1e-17) and
-gives the same word and C in all six models.
-
-## v0.11
-- Jacobi constant down to 0 (slider: upper 80 % = 3.25 .. 2.95, lower 20 % = 2.95 .. 0; typed values 0 .. 3.25).
-- Hand-set phase angles (screens 2-4, model box): ER3BP f0, HR4BP theta2, QHR4BP-e theta1 / theta2, QHR4BP-i theta3 / theta2
-  (sliders 0-360 deg, epoch value shown); part of the model key, so maps are cached per phase. HFEM keeps the ephemeris.
-- Screen 4: "-/+ button size" (how much one press changes |dv| and the angles); dv map next to the trajectory; the map
-  follows the time slider (a click on it moves the selected burn to that time, or creates one); backward design
-  ("a burn changes the past"): the trajectory after the last burn is kept, the state before each burn is
-  (after - dv) propagated backward, burn times from -horizon to +horizon, and the dv map colours the word before the
-  burn (read backward). Checks in `tests/maneuver_back.ts`.
-
-## Real missions (v0.12)
-"Missions" (header): Artemis I and II (NASA/JSC OEM), CAPSTONE, KPLO/Danuri, GRAIL-A (JPL Horizons, converted to OEM
-in public/data/missions), or any CCSDS OEM / Horizons vector table (Earth- or Moon-centred, km, km/s; UTC/TAI/TT/TDB
-with leap seconds). `src/core/mission.ts`: states -> geocentric TDB -> pulsating Earth-Moon states in the section
-convention (instantaneous frame, rho' = d rho / d tau'), Jacobi-like C per sample, the symbolic word (each sample at its
-own C, crossings refined by Hermite interpolation + bisection), boundary crossings with (psi1 or s, psi2, z, psi3, C) and
-their section piece, and maneuvers: HFEM propagation over every sample interval, residual |dv| above the threshold and
-8x its local median, merged spans turned into one impulse at the middle (forward/backward propagation), components in
-VNB about the Moon. "Use" on a crossing sets C, the word, the section point, HFEM and the epoch (to the second) and
-optionally loads the maneuvers into screen 4; the real trajectory is drawn in purple on screens 1, 3 and 4.
-Ephemeris tables now include 2011-2012 (GRAIL); HFEM can be built over any span (`buildHfemRange`, stitched year files).
-Checks (`tests/missions.ts`): HFEM from a crossing follows the real trajectory to 3-4 km over 3 days (CAPSTONE, KPLO,
-GRAIL cruise) and ~17-70 km over 1-2 days before the Artemis I powered flyby; Artemis I maneuvers found: OPF 179 m/s
-(11-21 12:47), DRI 111 m/s (11-25 21:56), DRDB 138 m/s (12-01 21:58), RPF 292 m/s (12-05 16:48).
-"closest real epoch" (model box, hand-set phases): searches the 2020-2035 phase table for the date whose phase angles
-are closest, so HFEM can be run with about the same geometry.
-
-## v0.13
-- Start screen with the Symbolic Cislunar Designer logo, the STAR Group mark, the NSF funding statement and logo, and
-  the credit "Developed by Seur Gi Jo · STAR Group, Embry-Riddle Aeronautical University" (public/brand, src/brand.ts);
-  no copyright line until ownership is settled with the PI / ERAU. Click the logo or Start; the header logo goes back.
-- Real-mission crossings of the current section edge are drawn on the screen-2 map as purple diamonds (hover for the
-  date and C; the one in use is larger).
-- Mission panel: click a maneuver to open screen 4 at it: the last usable crossing before the maneuver is used as the
-  section (with the mission's maneuvers loaded), the burn is selected, and its Δv map opens with |Δv| range and β
-  fitted so the executed Δv (red triangle) is on the map.
-
-## v0.14: mission maneuvers fitted to the real trajectory
-The detected impulses alone do not reproduce a mission (Artemis I: 700 km off after 5 d, 230 000 km after 21 d): the
-point-mass HFEM drifts from the flown path (tens of km by the 130 km lunar flyby) and a finite burn is not an impulse.
-`src/core/missionFit.ts` re-solves each maneuver in time order in the app's own model (same epoch, section state and
-propagator settings as screen 4): Newton with a finite-difference Jacobian and step halving, so that the trajectory
-after the burn passes through the real position min(2 d, next burn - 0.05 d) later. Maneuvers with no real data to aim
-at (after the end of the file) are switched off. Each burn shows its note ("fitted ... (detected ...), miss ... km").
-Artemis I with the fitted burns stays within 3-66 km of the real trajectory over 21 d (OPF 175.6, DRI 111.6,
-DRDB 138.6, RPF 279.0 m/s); Artemis II within 1 km over 5 d; CAPSTONE within 15 km after its fitted burn.
-Mission panel: "Use" / "Δv map" buttons moved to the first column and the tables keep their height (the panel scrolls).
-
-## v0.15
-
-- Built-in missions: only Artemis I and II are shipped. CAPSTONE, KPLO and GRAIL were removed (their Horizons tables start after Earth departure, so they were incomplete). Any CCSDS OEM or JPL Horizons vector table can still be loaded with **Missions → Load a file…**; the 2011–2012 and 2020–2035 ephemeris tables are kept.
-- All screens open on the full Earth–Moon view (2D views and the 3D view centred on the Earth–Moon system); the Moon-centred view is one click away.
-- Screen 4, default mode "the side away from the section": the trajectory is propagated both ways from the section (−horizon … +horizon). Burns after the section change the future; burns before it change the past (the state at the section is kept). Burns can be added at negative times and the Δv map works there too (read backward).
-- Mission maneuvers before the crossing are also fitted to the real trajectory (backward from the section, target inside the data span).
-- New test: tests/maneuver_anchored.ts.
+### Model box (screens 2–4)
+- Perturbation switches choose the model, and the epoch sets its phase angles.
+- In ER3BP, HR4BP and the QHR4BP models the phase angles can also be set by hand. **Closest real epoch** finds
+  the date in 2020–2035 whose phases are closest to the hand-set ones, so HFEM can be run with about the same
+  geometry.
 
 ## Notation
 | symbol | meaning |
@@ -157,28 +121,156 @@ Mission panel: "Use" / "Δv map" buttons moved to the first column and the table
 | z | height of the section point above the Earth–Moon plane [ndim] |
 | ψ₃ | out-of-plane velocity angle (elevation above the Earth–Moon plane) [deg] |
 | θ₁, θ₂, θ₃, f₀ | epoch phase angles of the perturbation models (QPO angles, ER3BP true anomaly) |
+| C | Jacobi constant (other models: CR3BP-equivalent value at the section) |
+| \|Δv\|, α, β | burn magnitude [m/s], in-plane direction, out-of-plane angle [deg] |
 
-## 3D (v0.4–v0.7)
-- 3D symbolic map (map screen → "3D volume", `src/ui/Volume3D.tsx`): a stack of adaptive (ψ₁ or s, ψ₂)
-  maps, one per layer of ψ₃ (z fixed) or z (ψ₃ fixed); 7 / 13 / 25 layers, 49² or 97² per layer, middle
-  layer first, each layer cached like any map. Shown as voxels: "Boundaries" = voxels whose class differs
-  from a neighbour (largest class hidden by default), "Cloud" = every voxel; a highlighted legend entry is
-  drawn solid. The selected layer is a textured plane and the 2D map below; click a voxel to mark it,
-  then open its trajectory.
-- Slices: every map can be taken at fixed z, ψ₃; (z, ψ₃) maps at a fixed section point (s or ψ₁, ψ₂).
-- 3D viewer (trajectory screen → 3D, `src/ui/Traj3D.tsx`, three.js, loaded on demand): rotating frame
-  with the trajectory coloured by symbol region, the zero-velocity surface 2U(x, y, z) = C (CR3BP
-  reference, height field clipped at the in-plane ZVC and at |z| = 0.55), the lunar-ellipse cylinder,
-  the L3–L4–L5 circle and the section; or the inertial frame (epoch Earth–Moon plane) with the Moon's
-  path and the Sun direction. Views 3D / x–y / x–z / y–z; Moon- or Earth–Moon-centred.
+Burn directions:
 
-## Colours (v0.8)
-All-classes maps have two schemes (legend panel): **Distinct** (default; Tableau-20 order without greys, then
-golden-angle extras) and **By ending** (family of the last symbol: E red, E_C* dark red, M grey/blue, X yellow).
-A "by branch" scheme (hue from the first symbols) is still in palette.ts but hidden from the UI. Each scheme keeps
-a class's colour for the session, so maps of different models and epochs compare directly. Thin class-boundary
-lines are on by default (drawn where the displayed colour changes, so "Other" is not outlined class by class).
+| frame | α | β |
+|---|---|---|
+| VNB | measured from V towards B (0° prograde, 90° outward, 180° retrograde) | towards N, the orbit normal |
+| rotating | measured from +x towards +y | towards +z |
 
-## Next
-Zero-velocity surface per model at the section epoch, 3D region view on the word screen,
-mission overlays (Artemis II, KPLO, CAPSTONE), FTLE overlay, trajectory metrics / filters.
+## Dynamical models
+| switch | model |
+|---|---|
+| none | CR3BP |
+| Moon eccentricity | ER3BP |
+| Sun | HR4BP |
+| Sun + eccentricity | QHR4BP (eccentricity data) |
+| Sun + inclination | QHR4BP (inclination data) |
+| full ephemeris | HFEM: Earth, Moon and Sun point masses, JPL DE421 |
+
+- The epoch (TDB) sets f₀, the Sun phase and the QPO angles from `public/data/phases.json`. These are the same
+  per-epoch fits as the Python/MATLAB pipeline.
+- HFEM uses hourly Float32 ephemeris tables, `public/data/ephem_YYYY.b64.txt`, for 2011–2012 and 2020–2035.
+- Section states use the "same position + instantaneous angular rate" convention (pulsating instantaneous frame),
+  so a point (ψ₁ or s, ψ₂, z, ψ₃, C) means the same physical state in every model.
+
+## Real missions
+**Missions** (header) loads Artemis I or Artemis II (NASA/JSC OEM, shipped in `public/data/missions`). **Load
+a file…** loads any CCSDS OEM or JPL Horizons vector table:
+- Earth- or Moon-centred;
+- in km and km/s;
+- with time in UTC, TAI, TT or TDB (leap seconds handled).
+
+For a loaded mission the app shows:
+- **Symbolic word**: each sample is classified at its own C. Crossings are refined by Hermite interpolation and
+  bisection.
+- **Crossings**: each crossing comes with (ψ₁ or s, ψ₂, z, ψ₃, C) and its section piece.
+  - **Use** sets C, the word, the section point, HFEM and the epoch (to the second) from the crossing. It can
+    also load the mission's maneuvers into screen 4.
+  - The real trajectory is drawn in purple on the screens for comparison.
+- **Maneuvers found**:
+  - Detection: velocity jumps against HFEM propagation between samples, above a threshold (default 1 m/s) and
+    8× the local median, each turned into one impulse at the middle of the burn.
+  - Clicking one opens its Δv map with the executed Δv marked.
+  - **Fit to the real trajectory** (default on): each burn is re-solved by Newton iteration in the app's own
+    model. A burn after the section is solved so the trajectory passes through the real position after it; a
+    burn before the section, so the trajectory passes through the real position before it.
+
+  Artemis I with fitted burns stays within a few tens of km of the flown trajectory over three weeks. Artemis II
+  stays within 1 km over 5 days.
+
+## How it works
+- **Partition** (`partition.ts`, `symbols.ts`): `classify(x, y, C)` returns one of the 14 symbols.
+  `boundary.ts` lists each edge's boundary pieces that are accessible at C.
+- **Propagation** (`cr3bp.ts`): DOP853 with on-line region tracking, forward or backward. It returns the word,
+  the transition times and the final state. The last step lands exactly on the end time.
+- **Models** (`models.ts`, `modelSetup.ts`, `icmap.ts`): each model provides its equations of motion, the
+  mapping from a section point to its state, and an inertial snapshot (spacecraft, Moon, Sun).
+- **Maps** (`mapEngine.ts`, `worker.ts`, `cache.ts`):
+  - adaptive dyadic refinement on a worker pool, with IndexedDB checkpoints;
+  - 2D maps, slices and 3D volumes all use the same engine;
+  - Δv maps run through it as a *custom* map, with one state and C per grid point.
+- **Maneuvers** (`maneuver.ts`):
+  - A burn is an inertial velocity change applied as A⁻¹Δv, where A = dI/dx is the Jacobian of the model's
+    inertial snapshot. One code path serves every model.
+  - After a burn, C is updated (CR3BP: exact Jacobi; other models: the CR3BP-equivalent change of the
+    pulsating speed).
+  - Plans: `runPlan` (forward), `runPlanBackward` (keep the end) and `runPlanAnchored` (section fixed, past and
+    future burns).
+  - `prepareDvMap` precomputes the burn state, so a Δv-map point costs one linear update.
+- **Missions** (`mission.ts`, `missionFit.ts`): file parsing, time scales, conversion to the section
+  convention, the word and crossings, maneuver detection and Newton fitting.
+
+## Code map
+```
+src/
+  brand.ts              credit and funding text for the start screen
+  core/
+    constants.ts        CR3BP constants, libration points, partition geometry, regimes
+    symbols.ts          alphabet, colours, graph layout, edges
+    partition.ts        point classifier and region raster
+    boundary.ts         section boundaries on any edge, accessible pieces
+    section.ts          section states and default windows
+    icmap.ts            section point -> initial state for each model
+    cr3bp.ts            DOP853 propagation with region tracking
+    dop853_coeffs.ts    integrator coefficients
+    models.ts           ER3BP, HR4BP, QHR4BP, HFEM dynamics
+    modelSetup.ts       building a model for an epoch, phases, closest real epoch
+    words.ts            class words, prefix match, coarse alphabet
+    mapEngine.ts        adaptive maps, worker pool
+    worker.ts           map worker
+    cache.ts            IndexedDB cache
+    maneuver.ts         burns, frames, plans, Δv-map preparation
+    mission.ts          OEM / Horizons parsing, mission word, crossings, maneuver detection
+    missionFit.ts       fitting mission maneuvers to the real trajectory
+  ui/
+    App.tsx             screens, header, shared state
+    Splash.tsx          start screen
+    GraphView.tsx       symbolic graph
+    RegionView.tsx      2D partition / trajectory view
+    MapScreen.tsx       symbolic maps, legend, slices
+    Volume3D.tsx        3D symbolic map
+    TrajScreen.tsx      trajectory screen
+    FineTune.tsx        fine-tune panel
+    Traj3D.tsx          3D trajectory viewer
+    ManeuverScreen.tsx  maneuver screen
+    DvMap.tsx           Δv symbolic map
+    MissionPanel.tsx    real missions
+    ModelPanel.tsx      model and epoch box
+    palette.ts          class colour schemes
+    widgets.tsx, styles.css
+public/
+  brand/                logo, STAR Group mark, NSF logo
+  data/                 ephemeris tables, phase table, QPO data
+  data/missions/        Artemis I / II OEM files
+tests/                  checks (run with npx tsx tests/<name>.ts)
+validation/             Fig. 12 reference map from the paper
+```
+
+## Validation and tests
+Run a check with `npx tsx tests/<name>.ts`:
+
+| test | what it checks |
+|---|---|
+| `fig12.ts` | the paper's Fig. 12 class map (C = 3.1666, ψ₁ 181–204°, ψ₂ 17–52°): 98.7 % of 864 sampled cells match; the rest are isolated boundary cells |
+| `edges.ts`, `mapping.ts`, `slice3d.ts` | section pieces on every edge, section-state mapping per model, 3D slices |
+| `models_dump.ts`, `backward_dump.ts` | model and backward propagation against the Python engine. CR3BP 60/60, ER3BP 59/60, HR4BP 60/60, QHR4BP 60/60 on both datasets, HFEM 59/60. Backward QHR4BP / HFEM agree to ~1e-5 / 1e-8 |
+| `maneuver.ts` | measured inertial Δv equals the request to 1e-4 m/s in every model and frame; the no-burn plan equals plain propagation; the Δv-map state equals the plan state |
+| `maneuver_back.ts`, `maneuver_anchored.ts` | backward and anchored plans: the section point is kept, burns re-apply exactly (1e-12 to 1e-15), the Δv map at past burns reproduces the plan |
+| `missions.ts`, `mission_fit.ts` | mission parsing and detected maneuvers; deviation from the real trajectory with fitted burns |
+
+`tests/app_data_gen.py` regenerates `public/data` (it needs the QHR4BP Python package).
+
+## Deployment
+`.github/workflows/deploy.yml` builds the app and publishes it to GitHub Pages at every push to `main`. This
+needs Settings → Pages → Source set to "GitHub Actions".
+
+To update the site:
+```
+git add -A
+git commit -m "describe the change"
+git push
+```
+
+To embed the app in another web page:
+```html
+<iframe src="https://erau-star.github.io/Symbolic-Cislunar-Designer/"
+        style="width:100%; height:900px; border:0;" title="Symbolic Cislunar Designer"></iframe>
+```
+
+## License
+No license has been chosen yet, so all rights are reserved. Please contact the STAR Group at Embry-Riddle
+Aeronautical University before reusing the code.
