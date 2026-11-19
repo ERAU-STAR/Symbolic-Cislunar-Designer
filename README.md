@@ -113,6 +113,8 @@ Here you choose the energy and the word.
   - the symbolic graph of the current regime, where nodes are symbols and arrows are allowed transitions.
 - **Building a word**: tap regions or nodes to build the word. Only transitions allowed at the current C can be
   added. You can remove the last symbol (Undo) or start over (Clear).
+- **Impacts end a word**: E_C and M_C are the Earth and the Moon themselves. A word cannot start there, and
+  nothing can be added after them.
 - **The section**: the transition into one symbol of the word is the section where the design starts. By
   default it is the first transition. Tap a later symbol in the word bar to move this point, called "now".
   Symbols after "now" are matched forward in time, and symbols before it are matched by backward propagation.
@@ -191,25 +193,36 @@ Here you add impulsive burns to the trajectory from screen 3 and see how they ch
   - Values can be typed, set with sliders, or changed with −/+ buttons. The "−/+ button size" sets how much one
     press changes |Δv| and the angles.
   - Any number of burns; each can be switched off.
-- **Two design modes**:
-  - **The side away from the section** (default): the state at the section is fixed. A burn after it changes
-    the future; a burn before it changes the past (the state before that burn is the state after it minus Δv,
-    propagated backward).
-  - **Only the past (keep the end)**: the trajectory after the last burn is kept, and every earlier part is
-    rebuilt backward.
+- **Each burn changes either the future or the past**, chosen in its own card:
+  - **changes the future →**: the state before the burn is kept, and the trajectory after it is propagated from
+    (state + Δv).
+  - **← changes the past**: the state after the burn is kept, and the trajectory before it is propagated
+    backward from (state − Δv).
+- **Burns are applied in the order they are made** (Δv1, Δv2, …). Each one acts on the trajectory left by the
+  burns before it. Editing a burn re-applies the later ones on top of it.
+- **Designing a burn**:
+  1. Move the time slider. With no burn selected, the Δv map shows what a new burn at that time would do.
+     "Next burn" chooses whether it changes the future or the past.
+  2. Click the map, or press **+ New Δv**, to place a draft burn. While it is a draft, its time follows the time
+     slider, so you can look for the best place to burn. You can also switch its side and set |Δv|, α and β.
+  3. Press **Done** to fix it. The map then follows the time slider again, ready for the next burn.
+  4. Click a burn (its card or its mark on the timeline) to see its own Δv map again and edit it. **Close** goes
+     back to the map for a new burn.
 - **Feedback**:
   - the trajectory is re-propagated on every change, in about 1–5 ms (CR3BP) to 10–35 ms (HFEM);
   - you see the trajectory without burns, the new word with the changed symbols outlined, the total Δv, and
     C before and after each burn.
-- **Δv map**: a symbolic map for the selected burn, over (α, |Δv|) at fixed β, or over (α, β) at fixed |Δv|.
-  - Colours: the word after the burn (or before it, read backward, for a burn before the section), or how much
-    of your word the whole trajectory realises.
-  - Other burns are applied as they are, so the map shows exactly what this one burn can do.
+- **Δv map**: a symbolic map over (α, |Δv|) at fixed β, or over (α, β) at fixed |Δv|.
+  - The burns made before this one are applied; later ones are ignored. The map therefore shows what this one
+    burn can do on the trajectory it acts on.
+  - Colours: the word after the burn, for a burn that changes the future, or the word before it, read backward,
+    for one that changes the past. For a burn after the section that changes the future, the map can also show
+    how much of your word the whole trajectory realises.
   - Click or drag on the map to set the burn.
-  - The map can be shown next to the trajectory and can follow the time slider. Clicking it then moves the
-    selected burn to that time, or creates one there.
-- **Export**: the plan as JSON (burn times, Δv in the chosen frame, rotating and inertial components, model
-  states and C before and after each burn).
+- **Real missions**: maneuvers loaded from a mission are applied outwards from the section. Burns after the
+  crossing change the future and burns before it change the past.
+- **Export**: the plan as JSON (order, side, burn times, Δv in the chosen frame, rotating and inertial components,
+  model states and C before and after each burn).
 
 ### Model box (screens 2–4)
 - Perturbation switches choose the model (see [Dynamical models](#dynamical-models)).
@@ -309,7 +322,9 @@ Limits:
 - **Propagation** (`cr3bp.ts`):
   - an adaptive DOP853 integrator (8th order) with on-line region tracking, forward or backward in time;
   - it returns the word, the transition times, the final state and, on request, the samples;
-  - the last step lands exactly on the end time, and impacts with the Earth or the Moon end the propagation.
+  - the last step lands exactly on the end time, and impacts with the Earth or the Moon end the propagation;
+  - a step that would end inside the Earth or the Moon is retried shorter, so regions crossed just before an
+    impact are not skipped.
 - **Models** (`models.ts`, `modelSetup.ts`, `icmap.ts`): each model provides three things through one
   interface:
   - its equations of motion;
@@ -328,11 +343,10 @@ Limits:
     therefore serves every model and frame.
   - **C after a burn**: in the CR3BP this is the exact Jacobi constant. In the other models it is the
     CR3BP-equivalent change of the pulsating speed.
-  - **Plans**:
-    - `runPlan` propagates forward;
-    - `runPlanBackward` keeps the end;
-    - `runPlanAnchored` keeps the section fixed, with burns both before and after it.
-  - **Δv maps**: `prepareDvMap` precomputes the state at the burn and its Jacobian, so each Δv-map point costs one
+  - **Plans**: `runPlanSeq` applies the burns in the order they were made, each changing the future or the past;
+    the trajectory is kept as a chain of pieces, each defined by one anchor state. (`runPlan`, `runPlanBackward`
+    and `runPlanAnchored` are the earlier forward, keep-the-end and section-anchored plans, kept for the tests.)
+  - **Δv maps**: `prepareDvMapSeq` precomputes the state at the burn and its Jacobian, so each Δv-map point costs one
     linear update plus its propagation.
 - **Missions** (`mission.ts`, `missionFit.ts`):
   - file parsing and time scales;
@@ -394,8 +408,9 @@ Run a check with `npx tsx tests/<name>.ts`:
 |---|---|
 | `fig12.ts` | the paper's Fig. 12 class map (C = 3.1666, ψ₁ 181–204°, ψ₂ 17–52°): 98.7 % of 864 sampled cells give the same class; the rest are isolated boundary cells |
 | `edges.ts`, `mapping.ts`, `slice3d.ts` | section pieces on every edge, section-state mapping per model, 3D slices |
-| `models_dump.ts`, `backward_dump.ts` | the models against the Python engine: CR3BP 60/60, ER3BP 59/60, HR4BP 60/60, QHR4BP 60/60 on both datasets, HFEM 59/60. Backward QHR4BP / HFEM agree to ~1e-5 / 1e-8; the CR3BP backward run equals the mirrored forward run |
+| `models_dump.ts`, `backward_dump.ts` | the models against the Python engine (60 points): ER3BP, HR4BP, both QHR4BP models and HFEM 60/60; CR3BP 59/60, where the app records one more lunar sub-region just before a Moon impact that the Python engine steps over (the app's result does not change with a 100× smaller step). Backward QHR4BP / HFEM agree to ~1e-5 / 1e-8; the CR3BP backward run equals the mirrored forward run |
 | `maneuver.ts` | measured inertial Δv equals the request to 1e-4 m/s in every model and frame; the no-burn plan equals plain propagation; CR3BP C after a burn equals the Jacobi constant of the new state; the Δv-map state equals the plan state |
+| `maneuver_seq.ts` | the sequential design: with the default sides it equals the section-anchored plan, with all burns changing the past it equals the keep-the-end plan, and the Δv map reproduces the plan state for mixed sides |
 | `maneuver_back.ts`, `maneuver_anchored.ts` | backward and anchored plans: the section point is kept, burns re-apply exactly (1e-12 to 1e-15), the Δv map at a past burn reproduces the plan |
 | `missions.ts`, `mission_fit.ts` | mission parsing and detected maneuvers (Artemis I: OPF 179, DRI 111, DRDB 138, RPF 292 m/s); deviation from the real trajectory with fitted burns |
 

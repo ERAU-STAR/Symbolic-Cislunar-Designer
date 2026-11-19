@@ -1,15 +1,15 @@
 // Stage 2 of the maneuver design: symbolic map of the dv space for a burn at one time.
-// Grid over (alpha, |dv|) at fixed beta, or (alpha, beta) at fixed |dv|. Forward design: every point is
-// propagated forward from the burn (earlier burns applied) and coloured by the word after the burn.
-// Backward design: the trajectory after the burn is kept (later burns applied) and every point is
-// propagated backward, coloured by the word before the burn (read backward in time).
+// Grid over (alpha, |dv|) at fixed beta, or (alpha, beta) at fixed |dv|. The burns made before this one are
+// applied (sequential design). A burn that changes the future: every point is propagated forward from the burn and
+// coloured by the word after it. A burn that changes the past: the trajectory after the burn is kept and every
+// point is propagated backward, coloured by the word before the burn (read backward in time).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { runMap, displayIndex, workerCount, type MapState, type PointResult, type RunHandle } from '../core/mapEngine';
 import type { Piece, Window } from '../core/boundary';
 import { TSTAR_DAYS } from '../core/constants';
 import { wordNames } from '../core/words';
 import { isLunar } from '../core/symbols';
-import { prepareDvMap, ALPHA_HINT, BETA_HINT, type Burn, type DvFrame } from '../core/maneuver';
+import { prepareDvMapSeq, sideOf, ALPHA_HINT, BETA_HINT, type Burn, type BurnSide, type DvFrame } from '../core/maneuver';
 import type { Dyn, ModelParams } from '../core/models';
 import { buildLegend, OTHER, type Mode } from './palette';
 import { Sym } from './widgets';
@@ -19,7 +19,8 @@ const keep = { axes: 'amag' as Axes, magMax: 30, alpha: [-180, 180] as [number, 
 
 interface Props {
   dyn: Dyn; params: ModelParams; modelKey: string; s0: number[]; C: number; horizonDays: number;
-  burns: Burn[]; skipId: number | null; tDays: number; frame: DvFrame; backward: boolean;
+  /** burns applied before this one (in the order they were made) */
+  prior: Burn[]; tDays: number; frame: DvFrame; side: BurnSide;
   current: { mag: number; alpha: number; beta: number } | null;
   piece: Piece; user: number[]; coarse: boolean;
   onSet: (mag: number, alpha: number, beta: number) => void;
@@ -27,7 +28,8 @@ interface Props {
   focus?: { nonce: number; mag: number; beta: number } | null;
 }
 
-export function DvMap({ dyn, params, modelKey, s0, C, horizonDays, burns, skipId, tDays, frame, backward, current, piece, user, coarse, onSet, focus }: Props) {
+export function DvMap({ dyn, params, modelKey, s0, C, horizonDays, prior, tDays, frame, side: burnSide, current, piece, user, coarse, onSet, focus }: Props) {
+  const side0 = burnSide, backward = side0 === 'past';
   const [axes, setAxes] = useState<Axes>(keep.axes);
   const [magMax, setMagMax] = useState(keep.magMax);
   const [alphaW, setAlphaW] = useState<[number, number]>(keep.alpha);
@@ -36,7 +38,9 @@ export function DvMap({ dyn, params, modelKey, s0, C, horizonDays, burns, skipId
   const [fixedMag, setFixedMag] = useState(keep.fixedMag);
   const [levels, setLevels] = useState(keep.levels);
   const [modeS, setMode] = useState<Mode>(keep.mode);
-  const mode: Mode = backward ? 'classes' : modeS;
+  // "your word" is matched from the section, so it needs a burn that changes the future after the section
+  const matchOk = !backward && tDays > 0;
+  const mode: Mode = matchOk ? modeS : 'classes';
   const [maxSym, setMaxSym] = useState(keep.maxSym);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [state, setState] = useState<MapState | null>(null);
@@ -51,10 +55,9 @@ export function DvMap({ dyn, params, modelKey, s0, C, horizonDays, burns, skipId
   useEffect(() => { Object.assign(keep, { axes, magMax, alpha: alphaW, beta: betaW, fixedBeta, fixedMag, levels, mode: modeS, maxSym }); }, [axes, magMax, alphaW, betaW, fixedBeta, fixedMag, levels, modeS, maxSym]);
 
   // the map depends on the time, the frame and the other burns, not on the dv of the burn being designed
-  const others = burns.filter((b) => b.id !== skipId && b.on);
   const tq = +tDays.toFixed(3);
-  const prepKey = JSON.stringify([tq, frame, backward, others.map((b) => [b.tDays, b.frame, b.mag, b.alpha, b.beta]), s0, C, horizonDays]);
-  const prep = useMemo(() => prepareDvMap(dyn, s0, C, horizonDays, burns, skipId, tq, frame, backward), [dyn, prepKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const prepKey = JSON.stringify([tq, frame, side0, prior.map((b) => [b.tDays, b.frame, b.mag, b.alpha, b.beta, sideOf(b), b.on]), s0, C, horizonDays]);
+  const prep = useMemo(() => prepareDvMapSeq(dyn, s0, C, horizonDays, prior, tq, frame, side0), [dyn, prepKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const win: Window = axes === 'amag' ? { p1a: alphaW[0], p1b: alphaW[1], p2a: 0, p2b: magMax } : { p1a: alphaW[0], p1b: alphaW[1], p2a: betaW[0], p2b: betaW[1] };
   const preLen = prep ? wordNames(prep.prefix, false).length : 0;
 
@@ -200,7 +203,7 @@ export function DvMap({ dyn, params, modelKey, s0, C, horizonDays, burns, skipId
             <button className={axes === 'amag' ? 'on' : ''} onClick={() => setAxes('amag')}>(α, |Δv|)</button>
             <button className={axes === 'ab' ? 'on' : ''} onClick={() => setAxes('ab')}>(α, β)</button>
           </div>
-          {!backward && <div className="seg">
+          {matchOk && <div className="seg">
             <button className={mode === 'classes' ? 'on' : ''} onClick={() => setMode('classes')}>Words after the burn</button>
             <button className={mode === 'match' ? 'on' : ''} onClick={() => setMode('match')}>Your word</button>
           </div>}
@@ -226,7 +229,7 @@ export function DvMap({ dyn, params, modelKey, s0, C, horizonDays, burns, skipId
           </label>
           <button className="link small" onClick={() => { setAlphaW([-180, 180]); setMagMax(30); setBetaW([-60, 60]); }}>reset range</button>
         </div>
-        <div className="dim small">α: {ALPHA_HINT[frame]}. β: {BETA_HINT[frame]}. {backward ? 'Later burns are applied; the trajectory after this burn is kept.' : `Earlier burns are applied, later ones ignored.${preLen > 1 ? ` The first ${preLen - 1} symbols are fixed before the burn.` : ''}`}</div>
+        <div className="dim small">α: {ALPHA_HINT[frame]}. β: {BETA_HINT[frame]}. {prior.length ? 'The burns made before this one are applied, later ones ignored. ' : ''}{backward ? 'The trajectory after this burn is kept.' : `The trajectory before this burn is kept.${preLen > 1 ? ` The first ${preLen - 1} symbols from the section are fixed.` : ''}`}</div>
         <div className="legend">
           {legend?.entries.map((e) => {
             const plain = /^(partial|match|no |Other|out|forb|\d+ of )/.test(e.label);

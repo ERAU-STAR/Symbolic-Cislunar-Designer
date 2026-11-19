@@ -27,7 +27,17 @@ export const COMP_LABEL: Record<DvFrame, [string, string, string]> = {
  *  alpha = in-plane angle [deg] (VNB: from V towards B, i.e. 0 prograde, 90 outward, 180 retrograde;
  *          rotating: from +x towards +y), beta = out-of-plane angle [deg] (VNB: towards N = orbit normal;
  *          rotating: towards +z). */
-export interface Burn { id: number; tDays: number; frame: DvFrame; mag: number; alpha: number; beta: number; on: boolean; note?: string } // mag [m/s]
+export type BurnSide = 'future' | 'past';
+export interface Burn {
+  id: number; tDays: number; frame: DvFrame; mag: number; alpha: number; beta: number; on: boolean; note?: string; // mag [m/s]
+  /** future: the state before the burn is kept and the trajectory after it changes; past: the state after the burn
+   *  is kept and the trajectory before it changes (state before = state after - dv, propagated backward) */
+  side?: BurnSide;
+  /** still being placed (its time follows the time slider) until "Done" */
+  draft?: boolean;
+}
+/** default side: a burn after the section changes the future, one before it changes the past */
+export const sideOf = (b: Burn): BurnSide => b.side ?? (b.tDays < 0 ? 'past' : 'future');
 export const ALPHA_HINT: Record<DvFrame, string> = {
   'vnb-moon': '0° = prograde (V), 90° = outward (B), 180° = retrograde',
   'vnb-earth': '0° = prograde (V), 90° = outward (B), 180° = retrograde',
@@ -350,4 +360,139 @@ export function runPlanAnchored(dyn: Dyn, s0: number[], C: number, horizonDays: 
   const burnsOut = fut.burns.map((r) => res.get(r.burn) ?? r);
   const totalDv = burnsOut.filter((o) => o.reached).reduce((a, o) => a + o.dvMag, 0);
   return { segs: [...parts, ...fut.segs], burns: burnsOut, tokens, times, status: fut.status, tEnd: fut.tEnd, t: T, P, I, breaks, totalDv, now };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sequential design (screen 4). Burns are applied one after the other in the order they were made (array order).
+// The trajectory is a chain of pieces over [-H, H], each defined by an anchor state; the first piece is the section
+// state at t = 0. A burn takes the current state at its time and replaces the side it changes: "future" keeps
+// everything before the burn and propagates state + dv forward; "past" keeps everything after the burn and
+// propagates state - dv backward. Editing a burn re-applies the later ones on top of it.
+interface SeqPiece { a: number; y: Float64Array; C: number; lo: number; hi: number } // times in tau
+
+function propTo(dyn: Dyn, y: ArrayLike<number>, a: number, t: number, C: number): Float64Array | null {
+  if (t === a) return Float64Array.from(y as number[]);
+  const r = propagate([], { y0: y, t0: a, tEnd: Math.abs(t - a), dir: t > a ? 1 : -1, C, dyn, hMax: 0.01 });
+  return r.status === 0 ? Float64Array.from(r.yEnd!) : null;
+}
+
+function buildPieces(dyn: Dyn, s0: number[], C: number, H: number, burns: Burn[]) {
+  let pieces: SeqPiece[] = [{ a: 0, y: dyn.init(s0), C, lo: -H, hi: H }];
+  const out: BurnResult[] = burns.map((b) => ({ burn: b, reached: false, tau: b.tDays / TSTAR_DAYS, dvMag: Math.abs(b.mag) }));
+  burns.forEach((b, q) => {
+    const tb = b.tDays / TSTAR_DAYS;
+    if (!b.on || !(tb > -H && tb < H)) return;
+    const fut = sideOf(b) === 'future';
+    // the piece that holds the kept state at tb (future: the one ending at / covering tb; past: the one starting at / covering it)
+    const k = pieces.findIndex((pc) => (fut ? pc.lo < tb && tb <= pc.hi : pc.lo <= tb && tb < pc.hi));
+    if (k < 0) return;
+    const pc = pieces[k];
+    const yk = propTo(dyn, pc.y, pc.a, tb, pc.C);
+    if (!yk) return; // the trajectory ends (impact) before the burn
+    const tm = tb * dyn.tPerTau;
+    const d = dvOf(b);
+    const { y: yn, dvIn } = applyDv(dyn, tm, yk, b.frame, fut ? d : (d.map((v) => -v) as V3));
+    const wk = wEq(dyn, tm, yk), wn = wEq(dyn, tm, yn);
+    const Cn = pc.C + (wk[0] ** 2 + wk[1] ** 2 + wk[2] ** 2) - (wn[0] ** 2 + wn[1] ** 2 + wn[2] ** 2);
+    const rot = frameAxes(dyn, tm, yk, 'rot');
+    const sg = fut ? 1 : -1;
+    Object.assign(out[q], {
+      reached: true, dv: d, yBefore: Array.from(fut ? yk : yn), yAfter: Array.from(fut ? yn : yk),
+      dvInertial: dvIn.map((v) => sg * v) as V3, dvRot: rot.map((e) => sg * 1000 * (e[0] * dvIn[0] + e[1] * dvIn[1] + e[2] * dvIn[2])) as V3,
+      CBefore: fut ? pc.C : Cn, CAfter: fut ? Cn : pc.C,
+    });
+    if (fut) {
+      pieces = [...pieces.slice(0, k), { a: tb, y: yk, C: pc.C, lo: pc.lo, hi: tb }, { a: tb, y: yn, C: Cn, lo: tb, hi: H }];
+    } else {
+      pieces = [{ a: tb, y: yn, C: Cn, lo: -H, hi: tb }, { a: tb, y: yk, C: pc.C, lo: tb, hi: pc.hi }, ...pieces.slice(k + 1)];
+    }
+  });
+  return { pieces, out };
+}
+
+/** sequential plan, sampled over -H .. +H (time ascending) */
+export function runPlanSeq(dyn: Dyn, s0: number[], C: number, horizonDays: number, burns: Burn[]): PlanResult & { now: number; Cs: number[] } {
+  const H = horizonDays / TSTAR_DAYS;
+  const { pieces, out } = buildPieces(dyn, s0, C, H, burns);
+  // the piece holding t = 0 is always reachable; walk outwards from it and stop at an impact
+  const k0 = Math.max(0, pieces.findIndex((pc) => pc.lo <= 0 && 0 <= pc.hi));
+  const rec = new Map<number, { back?: PropResult; fwd?: PropResult }>();
+  let first = k0, last = k0, startImpact = 0, status: PropResult['status'] = 0, tEnd = H;
+  const runPiece = (k: number, dirs: ('back' | 'fwd')[]) => {
+    const pc = pieces[k], r = rec.get(k) ?? {};
+    if (dirs.includes('back') && pc.a > pc.lo) r.back = propagate([], { y0: pc.y, t0: pc.a, tEnd: pc.a - pc.lo, dir: -1, C: pc.C, record: true, hMax: 0.01, dyn });
+    if (dirs.includes('fwd') && pc.a < pc.hi) r.fwd = propagate([], { y0: pc.y, t0: pc.a, tEnd: pc.hi - pc.a, C: pc.C, record: true, hMax: 0.01, dyn });
+    rec.set(k, r);
+    return r;
+  };
+  const r0 = runPiece(k0, ['back', 'fwd']);
+  let goBack = !(r0.back && r0.back.status !== 0), goFwd = !(r0.fwd && r0.fwd.status !== 0);
+  if (!goBack) startImpact = r0.back!.status;
+  if (!goFwd) { status = r0.fwd!.status; tEnd = r0.fwd!.tEnd; }
+  for (let k = k0 - 1; goBack && k >= 0; k--) {
+    const r = runPiece(k, ['back', 'fwd']); first = k; // pieces before the section are anchored at their upper end
+    if (r.back && r.back.status !== 0) { startImpact = r.back.status; goBack = false; }
+  }
+  for (let k = k0 + 1; goFwd && k < pieces.length; k++) {
+    const r = runPiece(k, ['back', 'fwd']); last = k;
+    if (r.fwd && r.fwd.status !== 0) { status = r.fwd.status; tEnd = r.fwd.tEnd; goFwd = false; }
+  }
+  const T: number[] = [], P: number[][] = [], I: NonNullable<PropResult['I']> = [], Cs: number[] = [], breaks: number[] = [];
+  const push = (r: PropResult, rev: boolean, C0: number, skipFirst: boolean) => {
+    const n = r.t!.length;
+    for (let i = 0; i < n; i++) {
+      const j = rev ? n - 1 - i : i;
+      if (skipFirst && i === 0) continue;
+      if (T.length && r.t![j] < T[T.length - 1]) continue;
+      T.push(r.t![j]); P.push(r.P![j]); I.push(r.I![j]); Cs.push(C0);
+    }
+  };
+  for (let k = first; k <= last; k++) {
+    const pc = pieces[k], r = rec.get(k)!;
+    if (k > first) breaks.push(T.length);
+    if (r.back) push(r.back, true, pc.C, false);
+    if (r.fwd) push(r.fwd, false, pc.C, !!r.back);
+  }
+  const { tokens, times } = tokensFromSamples(T, P, Cs, startImpact);
+  if ((status === 1 || status === 2) && T.length) { tokens.push(status === 1 ? ID.MC : ID.EC); times.push(T[T.length - 1]); }
+  let now = T.findIndex((t) => t >= 0); if (now < 0) now = T.length - 1;
+  const totalDv = out.filter((o) => o.reached).reduce((a, o) => a + o.dvMag, 0);
+  const segs = pieces.slice(first, last + 1).map((pc, q) => { const r = rec.get(first + q)!; return { res: (r.fwd ?? r.back)!, C: pc.C }; });
+  return { segs, burns: out, tokens, times, status, tEnd: Math.min(tEnd, T.length ? T[T.length - 1] : 0), t: T, P, I, breaks, totalDv, now, Cs };
+}
+
+/** dv map for a burn in the sequential design: `prior` are the burns applied before it (in order). The state on the
+ *  kept side at tDays comes from that plan; state(mag, alpha, beta) gives the changed side. */
+export function prepareDvMapSeq(dyn: Dyn, s0: number[], C: number, horizonDays: number, prior: Burn[], tDays: number, frame: DvFrame, side: BurnSide) {
+  const H = horizonDays / TSTAR_DAYS, tau = tDays / TSTAR_DAYS, tm = tau * dyn.tPerTau;
+  if (!(tau > -H && tau < H) || Math.abs(tDays) < 1e-6) return null;
+  const fut = side === 'future';
+  const { pieces } = buildPieces(dyn, s0, C, H, prior);
+  const k = pieces.findIndex((pc) => (fut ? pc.lo < tau && tau <= pc.hi : pc.lo <= tau && tau < pc.hi));
+  if (k < 0) return null;
+  const pc = pieces[k];
+  const yb = propTo(dyn, pc.y, pc.a, tau, pc.C);
+  if (!yb) return null;
+  const C0 = pc.C;
+  // symbols already fixed between the section and a later burn (for matching your word)
+  let prefix: number[] = [];
+  if (fut && tau > 0) {
+    const pl = runPlanSeq(dyn, s0, C, horizonDays, prior);
+    let q0 = 0; for (let q = 0; q < pl.times.length; q++) if (pl.times[q] <= 0) q0 = q;
+    prefix = pl.tokens.slice(q0).filter((_, q) => pl.times[q0 + q] <= tau);
+  }
+  const ax = frameAxes(dyn, tm, yb, frame);
+  const A = posJacobian(dyn, tm, yb);
+  const kk = secPerT(dyn) / LU / 1000;
+  const w0 = wEq(dyn, tm, yb), w02 = w0[0] ** 2 + w0[1] ** 2 + w0[2] ** 2;
+  const cols = ax.map((e) => solve3(A, e.map((v) => v * kk) as V3));
+  const sg = fut ? 1 : -1;
+  const state = (mag: number, alpha: number, beta: number) => {
+    const d = dvComponents(frame, mag, alpha, beta);
+    const y = Array.from(yb);
+    for (let i = 0; i < 3; i++) y[3 + i] += sg * (cols[0][i] * d[0] + cols[1][i] * d[1] + cols[2][i] * d[2]);
+    const w = wEq(dyn, tm, y);
+    return { y, C: C0 + w02 - (w[0] ** 2 + w[1] ** 2 + w[2] ** 2) };
+  };
+  return { tau, prefix, state, n: dyn.n, C0, dir: sg as 1 | -1 };
 }

@@ -16,7 +16,7 @@ interface Props {
   onPick?: (id: number) => void;
   /** start = index of the section point (past before it); breaks = first index of each segment after a burn;
    *  ghost = reference trajectory drawn faintly (e.g. without the burns) */
-  traj?: { x: number[]; y: number[]; start?: number; breaks?: number[]; ghost?: { x: number[]; y: number[] } } | null;
+  traj?: { x: number[]; y: number[]; start?: number; breaks?: number[]; breakLabels?: string[]; ghost?: { x: number[]; y: number[] } } | null;
   section?: Piece | null; // boundary piece to highlight
   marker?: [number, number] | null;
   initialView?: View;
@@ -197,6 +197,7 @@ export function RegionView({ C, word = [], allowed = null, onPick, traj = null, 
         g.beginPath(); G.x.forEach((x, q) => (q ? g.lineTo(X(x), Y(G.y[q])) : g.moveTo(X(x), Y(G.y[q])))); g.stroke(); g.setLineDash([]);
       }
       const br = (traj.breaks ?? []).filter((b) => b > k0 && b < traj.x.length);
+      const brLab = (traj.breaks ?? []).map((b, q) => [b, traj.breakLabels?.[q]] as const).filter(([b]) => b > k0 && b < traj.x.length).map(([, l]) => l);
       const SEG_COL = ['#000000', '#1d4ed8', '#c2410c', '#15803d', '#7e22ce', '#be123c', '#0e7490'];
       const cuts = [k0, ...br, traj.x.length - 1];
       for (let q = 0; q + 1 < cuts.length; q++) { g.strokeStyle = SEG_COL[q % SEG_COL.length]; g.lineWidth = 1.6; seg(Math.max(k0, cuts[q] - (q ? 1 : 0)), cuts[q + 1]); }
@@ -206,7 +207,7 @@ export function RegionView({ C, word = [], allowed = null, onPick, traj = null, 
         const x = X(traj.x[b - 1] ?? traj.x[b]), y = Y(traj.y[b - 1] ?? traj.y[b]);
         g.fillStyle = '#dc2626'; g.strokeStyle = '#fff'; g.lineWidth = 1.2;
         g.beginPath(); g.moveTo(x, y - 7); g.lineTo(x + 6, y + 4.5); g.lineTo(x - 6, y + 4.5); g.closePath(); g.fill(); g.stroke();
-        g.fillStyle = '#111'; g.font = '600 11px system-ui'; g.fillText(`Δv${q + 1}`, x + 7, y - 6);
+        g.fillStyle = '#111'; g.font = '600 11px system-ui'; g.fillText(brLab[q] ?? `Δv${q + 1}`, x + 7, y - 6);
       });
     }
     if (marker) {

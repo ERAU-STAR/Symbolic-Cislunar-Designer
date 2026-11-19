@@ -52,8 +52,10 @@ export function App() {
 
   const graph = useMemo(() => graphAt(regimeIndex(C)), [C]);
   const allowed = useMemo(() => {
-    if (!word.length) return graph.active;
+    // a word cannot start inside the Earth or the Moon, and nothing follows an impact (E_C / M_C)
+    if (!word.length) return new Set([...graph.active].filter((i) => i !== ID.EC && i !== ID.MC));
     const last = word[word.length - 1];
+    if (last === ID.EC || last === ID.MC) return new Set<number>();
     return new Set([...(graph.adj.get(last) ?? [])].filter((i) => graph.active.has(i)));
   }, [graph, word]);
   // edges of the word that are not admissible at the current C (after moving the slider)
@@ -92,7 +94,9 @@ export function App() {
     return mission.burns.filter((b) => Math.abs(b.jd - j0) < horizonDays).map((b, q) => ({
       id: q + 1, tDays: +(b.jd - j0).toFixed(6), frame: 'vnb-moon' as const, mag: +b.mag.toFixed(4), alpha: +b.alpha.toFixed(3), beta: +b.beta.toFixed(3), on: true,
       note: `detected ${b.mag.toFixed(2)} m/s`,
-    }));
+      // burns after the crossing change the future, burns before it the past; applied outwards from the section
+      side: (b.jd >= j0 ? 'future' : 'past') as Burn['side'],
+    })).sort((a, b) => Math.abs(a.tDays) - Math.abs(b.tDays));
   };
   /** re-solve the detected maneuvers in the app's HFEM so the designed trajectory passes through the real positions */
   const fittedBurnsFor = async (c: Crossing, onProgress?: (s: string) => void): Promise<Burn[]> => {
@@ -183,13 +187,13 @@ export function App() {
             : `The ${NAMES[src]} → ${NAMES[tgt]} boundary is not accessible at this C. Lower C or move the "now" marker.`
         : !model.valid
           ? 'This perturbation combination has no model. Open the Model menu to change it.'
-          : `Ready: the section is ${NAMES[src]} → ${NAMES[tgt]} (green line)${p > 1 ? '; symbols before "now" are matched backward in time' : ''}. Tap a later symbol to move "now".`;
+          : `Ready: the section is ${NAMES[src]} → ${NAMES[tgt]} (green line)${p > 1 ? '; symbols before "now" are matched backward in time' : ''}. Tap a later symbol to move "now".${word[word.length - 1] === ID.EC || word[word.length - 1] === ID.MC ? ' The word ends with an impact, so nothing can follow it.' : ''}`;
 
   return (
     <div className="app">
       {splash && <Splash onStart={() => setSplash(false)} />}
       <header>
-        <div className="brand"><img className="brand-icon" src="brand/logo-icon.png" alt="" onClick={() => setSplash(true)} title="start screen" />Symbolic Cislunar Designer <span className="ver">v0.15 · by Seur Gi Jo</span></div>
+        <div className="brand"><img className="brand-icon" src="brand/logo-icon.png" alt="" onClick={() => setSplash(true)} title="start screen" />Symbolic Cislunar Designer <span className="ver">v0.16 · by Seur Gi Jo</span></div>
         <nav>
           <button className={showMission ? 'on' : ''} onClick={() => setShowMission((v) => !v)} title="load Artemis I/II or your own OEM / Horizons file">Missions{mission ? ` · ${mission.name}` : ''}</button>
           <button className={screen === 'word' ? 'on' : ''} onClick={() => setScreen('word')}>1 · Word</button>

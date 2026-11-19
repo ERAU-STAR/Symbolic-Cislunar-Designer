@@ -43,7 +43,7 @@ let defaultDyn: Dyn | null = null;
 export function propagate(x0: State, o: PropOptions): PropResult {
   const dyn = o.dyn ?? (defaultDyn ??= makeDyn({ kind: 'cr3bp' }));
   const N = dyn.n, sc = dyn.tPerTau, dir = o.dir ?? 1;
-  const hMax = (o.hMax ?? 0.02) * sc, tEnd = o.tEnd * sc;
+  const hMax = (o.hMax ?? 0.02) * sc, tEnd = o.tEnd * sc, hImp = 2e-5 * sc; // ~ 7.5 s
   const rtol = dyn.rtol, atol = dyn.atol;
   const Cj = o.C ?? jacobi(x0);
   const K: Float64Array[] = Array.from({ length: 13 }, () => new Float64Array(N));
@@ -102,6 +102,9 @@ export function propagate(x0: State, o: PropOptions): PropResult {
     const err = den > 0 ? (Math.abs(h) * e5) / Math.sqrt(den * N) : 0;
     steps++;
     if (!(err <= 1) && !isFinite(err)) { h *= 0.2; if (h < 1e-12 * sc) break; continue; }
+    // a step that ends inside the Earth or the Moon is retried shorter, so the regions crossed just before the
+    // impact (e.g. M_1 -> M_2 across x = x_Moon, which passes through the Moon) are recorded in order
+    if (err <= 1 && h > hImp && dyn.impact(last ? tFin : t + hs, ynew)) { h *= 0.25; continue; }
     if (err <= 1) {
       t = last ? tFin : t + hs; y = Float64Array.from(ynew); f0 = Float64Array.from(fnew);
       dyn.puls(t, y, pos);

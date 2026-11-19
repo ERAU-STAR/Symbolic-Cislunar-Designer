@@ -87,7 +87,9 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
   const layerSlice = (k: number): Slice => (vol.stack === 'psi3' ? { ...slice, z: vol.other, psi3: volVals[k] } : { ...slice, z: volVals[k], psi3: vol.other });
   const [zW, setZW] = useState<Window>(keep.zW ?? ZPSI0);
   const [fixed, setFixed] = useState<{ s: number; psi2: number } | null>(null);
-  const fx = fixed ?? (pick ? { s: pick.psi1, psi2: pick.psi2 } : auto ? { s: (auto.p1a + auto.p1b) / 2, psi2: (auto.p2a + auto.p2b) / 2 } : { s: 0, psi2: 0 });
+  // fixed point of the (z, psi3) map: the picked point, else the centre of the (psi1, psi2) window in use
+  const cw = win ?? auto;
+  const fx = fixed ?? (pick ? { s: pick.psi1, psi2: pick.psi2 } : cw ? { s: +((cw.p1a + cw.p1b) / 2).toFixed(4), psi2: +((cw.p2a + cw.p2b) / 2).toFixed(4) } : { s: 0, psi2: 0 });
   const W = axes === 'zpsi3' ? zW : win ?? auto;
   const setW = (w: Window | null) => (axes === 'zpsi3' ? setZW(w ?? ZPSI0) : setWin(w));
   // zoom history per axis pair, so "previous view" walks back through zoom-ins

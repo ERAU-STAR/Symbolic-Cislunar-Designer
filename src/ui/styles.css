@@ -75,7 +75,7 @@ main { flex: 1; min-height: 0; }
 .tick span { position: absolute; left: 4px; top: -7px; font-size: 10px; color: #374151; white-space: nowrap; }
 
 .wordbar { border-top: 1px solid var(--line); background: var(--panel); padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
-.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: 1; min-width: 200px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: 1; min-width: 200px; max-height: 78px; overflow-y: auto; }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-weight: 600; font-size: 14px; border: 1px solid rgba(0, 0, 0, 0.25); }
 .chip-n { font-size: 10px; opacity: 0.7; }
 .bad .chip { outline: 2px solid var(--bad); }
@@ -100,6 +100,8 @@ main { flex: 1; min-height: 0; }
 
 .traj-view { position: relative; flex: 1 1 420px; min-width: 260px; min-height: 340px; display: flex; }
 .traj-view .overlay { right: 8px; }
+.traj-screen > .traj-view { align-self: flex-start; height: min(calc(100vh - 150px), 900px); }
+@media (max-width: 700px) { .traj-screen > .traj-view { height: 62vh; } }
 .inertial { flex: 1; display: flex; justify-content: center; }
 .timeline { display: flex; flex-wrap: wrap; gap: 6px; }
 .tl { display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer; font-size: 11px; }
@@ -111,7 +113,9 @@ main { flex: 1; min-height: 0; }
 @media (max-width: 700px) {
   header { padding: 6px 12px; }
   .brand { font-size: 15px; }
-  .cslider { width: 78px; }
+  .cslider { width: 78px; overflow: hidden; }
+  .cslider-head input { width: 68px; }
+  .tick span { font-size: 9px; }
   .word-screen { min-height: 380px; }
   .map-screen, .traj-screen { padding: 8px 12px; }
 }
@@ -233,3 +237,12 @@ main { flex: 1; min-height: 0; }
 /* mission panel: sections keep their height; the panel scrolls */
 .mission-pop > * { flex: none; }
 .mission-table { min-height: 120px; }
+.burn.draft { border-color: #f59e0b; box-shadow: 0 0 0 1px #f59e0b inset; background: #fffbeb; }
+.side-seg button { font-size: 12px; padding: 3px 8px; }
+.new-burn { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--line); border-radius: 10px; }
+.map-for { padding: 2px 4px 6px; }
+/* screen 4 on wide screens: the side panel scrolls on its own so the trajectory and the dv map stay in view */
+@media (min-width: 900px) {
+  .man-screen { flex-wrap: nowrap; align-items: flex-start; }
+  .man-screen > .traj-side { max-height: calc(100vh - 150px); overflow-y: auto; padding-right: 4px; }
+}

@@ -98,14 +98,18 @@ export function GraphView({ graph, word, allowed, onPick }: Props) {
             onClick={() => ok && onPick(id)}>
             <circle cx={p.x} cy={p.y} r={R} fill={css(COLORS[id])} stroke="#111" strokeWidth={0.025} />
             <Label id={id} x={p.x} y={p.y} />
-            {order.length > 0 && (
-              <g>
-                <circle cx={p.x + R * 0.85} cy={p.y - R * 0.85} r={0.13} fill="#0f172a" />
-                <text x={p.x + R * 0.85} y={p.y - R * 0.85 + 0.05} fontSize={0.13} textAnchor="middle" fill="#fff" fontWeight={700}>
-                  {order.join(',')}
-                </text>
-              </g>
-            )}
+            {order.length > 0 && (() => {
+              // visit numbers; long words show the first two and the count ("3,5+2")
+              const lab = order.length <= 2 ? order.join(',') : `${order[0]},${order[1]}+${order.length - 2}`;
+              const w = Math.max(0.26, 0.075 * lab.length + 0.08);
+              return (
+                <g>
+                  <title>{`visits: ${order.join(', ')}`}</title>
+                  <rect x={p.x + R * 0.85 - w / 2} y={p.y - R * 0.85 - 0.13} width={w} height={0.26} rx={0.13} fill="#0f172a" />
+                  <text x={p.x + R * 0.85} y={p.y - R * 0.85 + 0.05} fontSize={0.13} textAnchor="middle" fill="#fff" fontWeight={700}>{lab}</text>
+                </g>
+              );
+            })()}
           </g>
         );
       })}
