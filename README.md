@@ -178,8 +178,11 @@ Here you look at the trajectory and adjust it.
 - **Word timeline**: every symbol with its time. Symbols before "now" come from backward propagation. Clicking
   a symbol jumps the time slider there.
 - **Fine-tune**:
-  - a small symbolic map around the point; drag on it to move the point;
-  - −/+ nudges for ψ₁ / s, ψ₂, z and ψ₃, with coarse, medium or fine steps and a step slider;
+  - a small symbolic map around the point, zoomed ×1 to ×1024 relative to the main map; it is recomputed
+    (33 × 33 adaptive) whenever the point, the zoom, z or ψ₃ changes; drag on it to move the point;
+  - −/+ nudges for ψ₁ / s, ψ₂, z and ψ₃ with a step slider from 1° down to 10⁻¹⁰° for angles (10⁻² to 10⁻¹²
+    for lengths). Finer steps are not meaningful: the integrator's relative tolerance is 10⁻¹⁰, and near
+    ψ₁ = 190° a double-precision number resolves only about 3 × 10⁻¹⁴°;
   - or type exact values.
 
   The trajectory updates live.

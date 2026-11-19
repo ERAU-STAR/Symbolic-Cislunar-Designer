@@ -25,6 +25,8 @@ export interface MapParams {
   modelKey: string; // e.g. "qhr4bp_ecc@2459912.26" (part of the cache key)
   /** maps that do not start on a section (the dv map): grid point -> model state at model time t0 */
   custom?: CustomMap;
+  /** short-lived maps (the fine-tune mini map): no device cache */
+  noCache?: boolean;
 }
 export interface CustomMap {
   key: string; // identifies the map in the cache
@@ -203,7 +205,7 @@ export function runMap(p: MapParams, onUpdate: (s: MapState, msg: string) => voi
   const s = newState(p);
   const key = cacheKey(p);
   const promise = (async () => {
-    const stored = await cacheGet<Stored>(key);
+    const stored = p.noCache ? null : await cacheGet<Stored>(key);
     if (stored && stored.src?.length === s.src.length) {
       unpack(s, stored);
       onUpdate(s, `restored ${s.computed} points from the device cache`);
@@ -287,7 +289,7 @@ export function runMap(p: MapParams, onUpdate: (s: MapState, msg: string) => voi
       if (cancelled) return s;
       s.level = 0;
       onUpdate(s, 'coarse grid done');
-      await cachePut(key, pack(s));
+      if (!p.noCache) await cachePut(key, pack(s));
     }
     for (let lev = s.level + 1; lev <= p.levels; lev++) {
       const sp = S / 2 ** (lev - 1), h = sp / 2, nb = (n - 1) / sp;
@@ -322,7 +324,7 @@ export function runMap(p: MapParams, onUpdate: (s: MapState, msg: string) => voi
       if (cancelled) return s;
       s.level = lev;
       onUpdate(s, lev === p.levels ? 'done' : `level ${lev}/${p.levels} done`);
-      await cachePut(key, pack(s));
+      if (!p.noCache) await cachePut(key, pack(s));
     }
     s.done = true;
     onUpdate(s, `done: ${s.computed} trajectories for ${n * n} grid points`);
