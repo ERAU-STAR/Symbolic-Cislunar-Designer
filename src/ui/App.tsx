@@ -193,7 +193,7 @@ export function App() {
     <div className="app">
       {splash && <Splash onStart={() => setSplash(false)} />}
       <header>
-        <div className="brand"><img className="brand-icon" src="brand/logo-icon.png" alt="" onClick={() => setSplash(true)} title="start screen" />Symbolic Cislunar Designer <span className="ver">v0.16 · by Seur Gi Jo</span></div>
+        <div className="brand"><img className="brand-icon" src="brand/logo-icon.png" alt="" onClick={() => setSplash(true)} title="start screen" />Symbolic Cislunar Designer <span className="ver">v0.16.1 · by Seur Gi Jo</span></div>
         <nav>
           <button className={showMission ? 'on' : ''} onClick={() => setShowMission((v) => !v)} title="load Artemis I/II or your own OEM / Horizons file">Missions{mission ? ` · ${mission.name}` : ''}</button>
           <button className={screen === 'word' ? 'on' : ''} onClick={() => setScreen('word')}>1 · Word</button>

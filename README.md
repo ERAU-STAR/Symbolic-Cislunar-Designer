@@ -154,6 +154,8 @@ Here you see which initial conditions on the section realise the word.
 - **Navigation**:
   - type the window limits, or draw a zoom box;
   - zoom out, or go back to the previous view;
+  - zooming has no practical limit: the window keeps about three significant digits of its size, down to
+    spans of about 10⁻⁹ (degrees or ndim), and the axis labels gain decimals as you zoom;
   - the map keeps its place when you switch modes.
 - **3D volume**:
   - a stack of maps, one per layer of ψ₃ (or z): 7, 13 or 25 layers at 49² or 97² points each;

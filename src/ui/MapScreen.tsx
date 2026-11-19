@@ -129,8 +129,7 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
       [a2, b2] = fitP(a2, b2, auto.p2a, auto.p2b, true);
     }
     else { [a2, b2] = fit(a2, b2, -90, 90); }
-    const d1 = axes === 'zpsi3' ? 5 : p1dec + 1;
-    pushW({ p1a: +a1.toFixed(d1), p1b: +b1.toFixed(d1), p2a: +a2.toFixed(3), p2b: +b2.toFixed(3) });
+    pushW(winOf(a1, b1, a2, b2));
   };
   const [maxClasses, setMaxClasses] = useState(keep.maxClasses);
   const [depth, setDepth] = useState(keep.depth);
@@ -138,7 +137,20 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
   const [lines, setLines] = useState(keep.lines);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [hover, setHover] = useState('');
-  const p1dec = piece?.shape.unit === 'deg' ? 2 : 4;
+  // decimals that keep about 3 significant digits of the window span (fixed rounding stopped zooming at ~0.01 deg)
+  const decFor = (span: number) => Math.min(12, Math.max(2, Math.ceil(-Math.log10(Math.max(1e-12, Math.abs(span)))) + 3));
+  const MIN_SPAN = 1e-9; // below this the window is too small for double-precision section states to differ
+  /** a window from two corners, rounded to the decimals its size needs and never thinner than MIN_SPAN */
+  const winOf = (u0: number, u1: number, v0: number, v1: number): Window => {
+    const fix = (a: number, b: number): [number, number] => {
+      let lo = Math.min(a, b), hi = Math.max(a, b);
+      if (hi - lo < MIN_SPAN) { const c = (lo + hi) / 2; lo = c - MIN_SPAN / 2; hi = c + MIN_SPAN / 2; }
+      const d = decFor(hi - lo);
+      return [+lo.toFixed(d), +hi.toFixed(d)];
+    };
+    const [p1a, p1b] = fix(u0, u1), [p2a, p2b] = fix(v0, v1);
+    return { p1a, p1b, p2a, p2b };
+  };
   const [mode, setMode] = useState<Mode>(keep.mode);
   const [res, setRes] = useState<ResKey>('standard');
   const [state0, setState] = useState<MapState | null>(null);
@@ -234,7 +246,8 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
     window.addEventListener('resize', fit);
     return () => { ro.disconnect(); window.removeEventListener('resize', fit); };
   }, []);
-  const M = { l: 46, r: 8, t: 8, b: 38 };
+  // the left margin grows with the decimals the psi2 labels need at deep zoom
+  const M = { l: 46 + 7 * Math.max(0, (W ? decFor(W.p2b - W.p2a) - 2 : 1) - 1), r: 8, t: 8, b: 38 };
   useEffect(() => {
     const cv = canvas.current;
     if (!cv || !state || !legend) return;
@@ -278,9 +291,11 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
     g.fillStyle = '#222'; g.font = '11px system-ui'; g.textAlign = 'center';
     for (let q = 0; q <= 4; q++) {
       const v = w.p1a + (q / 4) * (w.p1b - w.p1a), x = M.l + (q / 4) * pw;
-      g.fillText(state.p.axes === 'zpsi3' ? v.toFixed(3) : piece?.shape.unit === 'deg' ? v.toFixed(1) : v.toFixed(3), x, side - M.b + 14);
+      const dx = Math.max(state.p.axes === 'zpsi3' || piece?.shape.unit !== 'deg' ? 3 : 1, decFor(w.p1b - w.p1a) - 2);
+      const dy = Math.max(1, decFor(w.p2b - w.p2a) - 2);
+      g.fillText(v.toFixed(dx), x, side - M.b + 14);
       const u = w.p2a + (q / 4) * (w.p2b - w.p2a), y = M.t + ph - (q / 4) * ph;
-      g.save(); g.textAlign = 'right'; g.fillText(u.toFixed(1), M.l - 4, y + 4); g.restore();
+      g.save(); g.textAlign = 'right'; g.fillText(u.toFixed(dy), M.l - 4, y + 4); g.restore();
     }
     const zp = state.p.axes === 'zpsi3';
     g.fillText(zp ? 'z of the section point [ndim]' : piece?.shape.label ?? 'ψ₁ [deg]', M.l + pw / 2, side - 4);
@@ -354,7 +369,7 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
             if (i < 0 || j < 0 || i >= n || j >= n) { setHover(''); return; }
             const k = displayIndex(state, i, j), r = k >= 0 ? state.res.get(k) : undefined;
             if (!r) { setHover(''); return; }
-            const where = `${q.psi1.toFixed(3)}, ${q.psi2.toFixed(2)}`;
+            const where = W ? `${q.psi1.toFixed(Math.max(3, decFor(W.p1b - W.p1a)))}, ${q.psi2.toFixed(Math.max(2, decFor(W.p2b - W.p2a)))}` : `${q.psi1.toFixed(3)}, ${q.psi2.toFixed(2)}`;
             if (state.p.axes !== 'zpsi3') {
               const pw = side - M.l - M.r, ph = side - M.t - M.b;
               const nearM = markPos(w).find((m) => Math.hypot(M.l + ((m.u - w.p1a) / (w.p1b - w.p1a)) * pw - p.x, M.t + ph - ((m.v - w.p2a) / (w.p2b - w.p2a)) * ph - p.y) < 9);
@@ -371,8 +386,8 @@ export function MapScreen({ C, user, userB, pieces, pieceIdx, setPieceIdx, horiz
             if (!d || !state) return;
             const p = loc(e);
             if (zoomMode && Math.hypot(p.x - d.start.x, p.y - d.start.y) > 8) {
-              const a = toPsi(d.start.x, d.start.y), b = toPsi(p.x, p.y), dec = axes === 'zpsi3' ? 4 : p1dec;
-              pushW({ p1a: +Math.min(a.psi1, b.psi1).toFixed(dec), p1b: +Math.max(a.psi1, b.psi1).toFixed(dec), p2a: +Math.min(a.psi2, b.psi2).toFixed(2), p2b: +Math.max(a.psi2, b.psi2).toFixed(2) });
+              const a = toPsi(d.start.x, d.start.y), b = toPsi(p.x, p.y);
+              pushW(winOf(a.psi1, b.psi1, a.psi2, b.psi2));
               setZoomMode(false);
               return;
             }
